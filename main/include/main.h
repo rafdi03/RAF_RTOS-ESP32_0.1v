@@ -13,6 +13,8 @@
 #include "COM.h"
 #include "ringbuff_com.h"
 #include "esp_log.h"
+#include "task.h"
+#include "task_registry.h"
 
 #pragma once
 

@@ -57,10 +57,10 @@ static esp_err_t validate_task_config(const rt_task_config_t *config) {
         ESP_LOGE(TAG, "Config Invalid: config atau callback NULL");
         return ESP_ERR_INVALID_ARG;
     }
-    if (config->name == NULL || strlen(config->name) == 0) {
-        ESP_LOGE(TAG, "Config Invalid: name kosong");
-        return ESP_ERR_INVALID_ARG;
-    }
+	if (config->name[0] == '\0') {
+	    ESP_LOGE(TAG, "Config Invalid: name kosong");
+	    return ESP_ERR_INVALID_ARG;
+	}
     if (config->period_ms == 0) {
         ESP_LOGE(TAG, "Config Invalid: period_ms tidak boleh 0");
         return ESP_ERR_INVALID_ARG;
@@ -271,12 +271,8 @@ esp_err_t rt_scheduler_start(void) {
             max_period = s_task_slots[i].config.period_ms;
         }
     }
-    uint32_t wdt_timeout = (max_period > 3000) ? (max_period + 1000) : 3000;
-    esp_err_t werr = init_task_watchdog(wdt_timeout);
-    if (werr != ESP_OK) {
-        s_scheduler_state = RT_STATE_ERROR;
-        return werr;
-    }
+	uint32_t wdt_timeout = max_period + 1000;
+	if (wdt_timeout < 3000) wdt_timeout = 3000;
 
     xSemaphoreTake(s_registry_lock, portMAX_DELAY);
 
