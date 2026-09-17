@@ -13,6 +13,14 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "Com.h"
+#include "IMU_MPU.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+#include "main.h"
 
 #ifdef __cplusplus
 extern "C" {

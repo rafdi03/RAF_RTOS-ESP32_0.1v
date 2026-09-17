@@ -14,6 +14,9 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "ringbuff_com.h"
+#include "main.h"
+#include "esp_log.h"
+#include <string.h>
 
 // Definisi 8 Antarmuka Komunikasi Universal
 typedef enum {

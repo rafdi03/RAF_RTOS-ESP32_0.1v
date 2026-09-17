@@ -6,11 +6,7 @@
  */
 
 #include "LCD.h"
-#include <string.h>
-#include "driver/i2c_master.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_rom_sys.h"
+
 
 #define LCD_BACKLIGHT    0x08
 #define LCD_ENABLE_BIT   0x04

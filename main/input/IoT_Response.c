@@ -6,13 +6,6 @@
  */
 
 #include "IoT_Response.h"
-#include "Com.h"
-#include "IMU_MPU.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#include <string.h>
-#include <stdio.h>
-#include <math.h>
 
 static const char *TAG = "IOT_RESP";
 

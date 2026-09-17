@@ -12,6 +12,11 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "main.h"
+#include <string.h>
+#include "driver/i2c_master.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_rom_sys.h"
 
 #define LCD_DEFAULT_ADDR    0x27  // Ganti ke 0x3F jika LCD Anda menggunakan alamat 0x3F
 
@@ -28,7 +33,7 @@ typedef struct {
 esp_err_t lcd_init(const lcd_config_t *config);
 esp_err_t lcd_init_pins(bsp_i2c_pins_t pins);
 void lcd_send_cmd(uint8_t cmd);
-void lcd_send_data(uint8_t data);
+void lcd_send_data(uint8_t data);	
 void lcd_put_cur(int row, int col);
 void lcd_send_string(const char *str);
 void lcd_clear(void);

@@ -5,10 +5,7 @@
  *      Author: Rafdi
  */
 
-#include "Com.h"
-#include "ringbuff_com.h"
-#include "esp_log.h"
-#include <string.h>
+#include "COM.h"
 
 static const char *TAG = "COM_HUB";
 static com_tx_handler_t s_tx_handlers[COM_IF_MAX] = {NULL};
@@ -52,26 +49,30 @@ static void com_dispatch_response(const com_inbound_req_t *req) {
 
     comm_packet_t resp = {
         .preamble = COMM_PACKET_PREAMBLE,
-        .msg_type = req->cmd_code | 0x80, 
+        .msg_type = req->cmd_code | 0x80,
         .payload_len = 0
     };
 
     if (req->cmd_code == CMD_REQ_PING) {
         const char pong[] = "PONG";
-        resp.payload_len = sizeof(pong);
-        memcpy(resp.payload, pong, sizeof(pong));
+        resp.payload_len = sizeof(pong) - 1;  
+        memcpy(resp.payload, pong, resp.payload_len);
     } else if (s_cmd_handler != NULL) {
         uint8_t out_len = 0;
-        if (s_cmd_handler(req->cmd_code, req->payload, req->payload_len, resp.payload, &out_len)) {
-            resp.payload_len = (out_len > sizeof(resp.payload)) ? sizeof(resp.payload) : out_len;
+        if (s_cmd_handler(req->cmd_code, req->payload, req->payload_len,
+                          resp.payload, &out_len)) {
+            resp.payload_len = (out_len > sizeof(resp.payload))
+                               ? sizeof(resp.payload)
+                               : out_len;
         } else {
-            resp.msg_type = 0xFF; // Command code not handled / invalid
+            resp.msg_type = 0xFF;
         }
     } else {
         resp.msg_type = 0xFF;
     }
 
     resp.crc16 = comm_crc16(&resp, offsetof(comm_packet_t, crc16));
+
     com_interface_t src = (com_interface_t)req->iface_source;
     if (src < COM_IF_MAX && s_tx_handlers[src] != NULL) {
         s_tx_handlers[src](&resp, sizeof(resp));
@@ -82,22 +83,27 @@ void com_update_1ms(void) {
     size_t item_size = 0;
     com_inbound_req_t *req = (com_inbound_req_t *)ringbuf_com_receive(&item_size, 0);
 
-    if (req == NULL) {
+    if (req == NULL || item_size == 0) {
         return;
     }
 
     uint8_t first_byte = *(uint8_t *)req;
+    com_interface_t src = (com_interface_t)req->iface_source;
 
-    // Mode A: JSON Text Request (dimulai dengan karakter '{')
     if (first_byte == '{') {
-        com_interface_t src = (com_interface_t)req->iface_source;
         char json_in[64] = {0};
-        size_t copy_len = (item_size - 1 < sizeof(json_in) - 1) ? item_size - 1 : sizeof(json_in) - 1;
+        size_t copy_len = (item_size < sizeof(json_in) - 1)
+                          ? item_size
+                          : sizeof(json_in) - 1;
         memcpy(json_in, req, copy_len);
         json_in[copy_len] = '\0';
 
+        size_t real_len = strnlen(json_in, copy_len);
+        json_in[real_len] = '\0';
+
         char json_out[256] = {0};
-        if (s_json_handler != NULL && s_json_handler(json_in, json_out, sizeof(json_out))) {
+        if (s_json_handler != NULL &&
+            s_json_handler(json_in, json_out, sizeof(json_out))) {
             if (src < COM_IF_MAX && s_tx_handlers[src] != NULL) {
                 s_tx_handlers[src](json_out, strlen(json_out));
             }
@@ -108,12 +114,12 @@ void com_update_1ms(void) {
             }
         }
     }
-    // Mode B: Binary Protocol Request (dimulai dengan Preamble 0xAA)
     else if (first_byte == COMM_PACKET_PREAMBLE) {
         if (comm_verify_crc16(req, offsetof(com_inbound_req_t, crc16), req->crc16)) {
             com_dispatch_response(req);
         } else {
-            ESP_LOGW(TAG, "Request dari IF %u korup / CRC Mismatch!", req->iface_source);
+            ESP_LOGW(TAG, "Request dari IF %u korup / CRC Mismatch!",
+                     req->iface_source);
         }
     }
 

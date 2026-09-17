@@ -63,17 +63,19 @@ bool ringbuf_com_send(const void *data, size_t len, uint32_t wait_ms) {
     }
 }
 
-bool ringbuf_com_send_from_isr(const void *data, size_t len, BaseType_t *pxHigherPriorityTaskWoken) {
+bool ringbuf_com_send_from_isr(const void *data, size_t len,
+                               BaseType_t *pxHigherPriorityTaskWoken) {
     if (s_comm_ringbuf == NULL || data == NULL || len == 0) {
         return false;
     }
 
-    BaseType_t res = xRingbufferSendFromISR(s_comm_ringbuf, data, len, pxHigherPriorityTaskWoken);
+    BaseType_t res = xRingbufferSendFromISR(s_comm_ringbuf, data, len,
+                                            pxHigherPriorityTaskWoken);
     if (res == pdTRUE) {
-        s_stats.total_sent++;
+        __atomic_fetch_add(&s_stats.total_sent, 1, __ATOMIC_RELAXED);
         return true;
     } else {
-        s_stats.dropped_packets++;
+        __atomic_fetch_add(&s_stats.dropped_packets, 1, __ATOMIC_RELAXED);
         return false;
     }
 }

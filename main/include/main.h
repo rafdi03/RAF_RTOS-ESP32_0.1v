@@ -9,6 +9,10 @@
 #define MAIN_INCLUDE_MAIN_H_
 
 #include <stdint.h>
+#include "Scheduler.h"
+#include "COM.h"
+#include "ringbuff_com.h"
+#include "esp_log.h"
 
 #pragma once
 

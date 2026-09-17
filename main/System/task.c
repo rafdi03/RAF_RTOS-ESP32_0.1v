@@ -10,18 +10,19 @@
 
 static const char *TAG __attribute__((unused)) = "TASK_JOBS";
 
-// Callback function pointer internal
-static int_callback_t in_user_cb = NULL;
+static volatile int_callback_t in_user_cb = NULL;
 
 void register_int_callback(int_callback_t cb) {
     in_user_cb = cb;
 }
 
 void execute_int_callback(void) {
-    if (in_user_cb != NULL) {
-        in_user_cb();
+    int_callback_t cb = (int_callback_t)in_user_cb;
+    if (cb != NULL) {
+        cb();
     }
 }
+
 
 void startup_application(void) {
     com_init(); 
