@@ -81,6 +81,7 @@ typedef struct {
     uint32_t execution_count;
     uint32_t execution_overruns; // T_exec > deadline_ms
     uint32_t deadline_misses;    // Terlambat dipanggil relatif terhadap periode
+    uint32_t missed_periods;     // Periode scheduler yang terlewati
 
     uint32_t min_exec_us;
     uint32_t max_exec_us;
@@ -93,7 +94,6 @@ typedef struct {
 esp_err_t init_scheduler_engine(void);
 esp_err_t rt_scheduler_register_task(const rt_task_config_t *config, rt_task_id_t *out_task_id);
 esp_err_t rt_scheduler_start(void);
-esp_err_t rt_scheduler_stop(void);
 rt_scheduler_state_t rt_scheduler_get_state(void);
 
 // Runtime Control & Profiler API

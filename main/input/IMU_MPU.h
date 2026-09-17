@@ -4,6 +4,7 @@
 #pragma once
 #include <stdint.h>
 #include "esp_err.h"
+#include "bsp_pins.h"
 #include "main.h"
 
 // Tipe data struct data IMU lengkap (Accel, Gyro, Suhu)

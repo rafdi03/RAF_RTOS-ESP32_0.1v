@@ -11,6 +11,7 @@
 #pragma once
 #include <stdint.h>
 #include "esp_err.h"
+#include "bsp_pins.h"
 #include "main.h"
 #include <string.h>
 #include "driver/i2c_master.h"

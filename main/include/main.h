@@ -9,12 +9,7 @@
 #define MAIN_INCLUDE_MAIN_H_
 
 #include <stdint.h>
-#include "Scheduler.h"
-#include "COM.h"
-#include "ringbuff_com.h"
-#include "esp_log.h"
-#include "task.h"
-#include "task_registry.h"
+#include "bsp_pins.h"
 
 #pragma once
 
@@ -37,28 +32,6 @@
 #define CAN_BAUD_RATE_MAX           1000     // 1000 kbps (1 Mbps - Maksimum TWAI Controller)
 #define UART_BAUD_RATE_MAX          921600   // 921.600 bps (Maksimum UART)
 
-
-typedef struct {
-    int sda;
-    int scl;
-} bsp_i2c_pins_t;
-	
-typedef struct {
-    int mosi;
-    int miso;
-    int sck;
-    int cs;
-} bsp_spi_pins_t;
-
-typedef struct {
-    int tx;
-    int rx;
-} bsp_uart_pins_t;
-
-typedef struct {
-    int tx;
-    int rx;
-} bsp_can_pins_t;
 
 #define I2C_PINS_LCD   ((bsp_i2c_pins_t){ .sda = 26, .scl = 25 })
 #define I2C_PINS_IMU   ((bsp_i2c_pins_t){ .sda = 14, .scl = 12 })

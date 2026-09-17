@@ -15,36 +15,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stddef.h>
-#include "esp_log.h"
-#include "main.h"
-#include "LCD.h"
-#include "IMU_MPU.h"
-#include "ringbuff_com.h"
-#include "COM.h"
-#include "com_wifi.h"
-#include "com_mqtt.h"
-#include "com_ota.h"
-#include "com_modbus_tcp.h"
-#include "com_espnow.h"
-#include "com_can.h"
-#include "com_lora.h"
-#include "com_uart.h"
-#include "esp_timer.h"
-#include "driver/gpio.h"
-#include "esp_intr_alloc.h"
-#include "esp_attr.h"
-#include "data_logger.h"
-#include "IoT_Response.h"
-
-typedef void (*int_callback_t)(void);
-
-void register_int_callback(int_callback_t cb);
-void execute_int_callback(void);
-
-void startup_application(void);
-void input_init(void);
-
 
 void job_1ms(void *arg);
 void job_5ms(void *arg);

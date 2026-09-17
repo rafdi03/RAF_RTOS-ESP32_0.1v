@@ -50,6 +50,8 @@ static esp_err_t init_task_watchdog(uint32_t timeout_ms) {
         err = esp_task_wdt_init(&twdt_config);
     }
     return err;
+	
+	ESP_LOGI(TAG, "WDT dikonfigurasi: timeout %lu ms", (unsigned long)timeout_ms);
 }
 
 static esp_err_t validate_task_config(const rt_task_config_t *config) {
@@ -360,6 +362,7 @@ esp_err_t rt_task_get_stats(rt_task_id_t task_id, rt_task_stats_t *out_stats) {
     out_stats->execution_count = slot->execution_count;
     out_stats->execution_overruns = slot->execution_overruns;
     out_stats->deadline_misses = slot->deadline_misses;
+    out_stats->missed_periods = slot->missed_periods;
     out_stats->min_exec_us = (slot->min_exec_us == UINT32_MAX) ? 0 : slot->min_exec_us;
     out_stats->max_exec_us = slot->max_exec_us;
     out_stats->last_exec_us = slot->last_exec_us;
@@ -373,19 +376,22 @@ esp_err_t rt_task_get_stats(rt_task_id_t task_id, rt_task_stats_t *out_stats) {
 
 void rt_scheduler_print_stats(void) {
     ESP_LOGI(TAG, "=================================== INDUSTRIAL RTOS METRICS SNAPSHOT ===================================");
-    ESP_LOGI(TAG, "%-3s | %-10s | %-3s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s",
-             "ID", "Name", "En", "Min(us)", "Avg(us)", "Max(us)", "Jitter", "Overrun", "Missed");
+    ESP_LOGI(TAG, "%-3s | %-10s | %-3s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s",
+             "ID", "Name", "En", "Min(us)", "Avg(us)", "Max(us)",
+             "Jitter", "Overrun", "Deadline", "Missed");
     ESP_LOGI(TAG, "--------------------------------------------------------------------------------------------------------");
 
     for (size_t i = 0; i < s_task_count; i++) {
         rt_task_stats_t st;
         if (rt_task_get_stats((rt_task_id_t)(i + 1), &st) == ESP_OK) {
-			ESP_LOGI(TAG, "%-3" PRIu32 " | %-10s | %-3s | %-8" PRIu32
-			              " | %-8" PRIu32 " | %-8" PRIu32
-			              " | %-8" PRIu32 " | %-8" PRIu32 " | %-8" PRIu32,
+            ESP_LOGI(TAG, "%-3" PRIu32 " | %-10s | %-3s | %-8" PRIu32
+                          " | %-8" PRIu32 " | %-8" PRIu32
+                          " | %-8" PRIu32 " | %-8" PRIu32 " | %-8" PRIu32
+                          " | %-8" PRIu32,
 			         st.id, st.name, st.enabled ? "Y" : "N",
 			         st.min_exec_us, st.avg_exec_us, st.max_exec_us,
-			         st.max_jitter_us, st.execution_overruns, st.deadline_misses);
+                     st.max_jitter_us, st.execution_overruns,
+                     st.deadline_misses, st.missed_periods);
         }
     }
     ESP_LOGI(TAG, "================================================================================------------------------");

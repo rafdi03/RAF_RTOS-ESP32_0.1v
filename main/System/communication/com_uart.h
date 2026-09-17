@@ -12,7 +12,7 @@
 
 #pragma once
 #include "esp_err.h"
-#include "main.h"
+#include "bsp_pins.h"
 #include <stddef.h>
 #include <stdint.h>
 
