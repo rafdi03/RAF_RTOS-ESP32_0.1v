@@ -11,8 +11,8 @@
 static const char *TAG = "SCHEDULER";
 
 typedef struct {
-    rt_task_id_t id;
-    rt_task_config_t config;
+    RAF_TaskId_t id;
+    RAF_TaskConfig_t config;
     TaskHandle_t free_rtos_handle;
 
     // Internal counters & Profiling
@@ -31,11 +31,11 @@ typedef struct {
 
     SemaphoreHandle_t lock; // Thread-safe snapshot isolation
     bool is_used;
-} rt_task_slot_t;
+} RAF_TaskSlot_t;
 
-static rt_task_slot_t s_task_slots[RT_MAX_TASKS];
+static RAF_TaskSlot_t s_task_slots[RAF_RT_MAX_TASKS];
 static size_t s_task_count = 0;
-static rt_scheduler_state_t s_scheduler_state = RT_STATE_UNINITIALIZED;
+static RAF_SchedulerState_t s_scheduler_state = RAF_RT_STATE_UNINITIALIZED;
 static SemaphoreHandle_t s_registry_lock = NULL;
 
 static esp_err_t init_task_watchdog(uint32_t timeout_ms) {
@@ -49,12 +49,15 @@ static esp_err_t init_task_watchdog(uint32_t timeout_ms) {
     if (err != ESP_OK) {
         err = esp_task_wdt_init(&twdt_config);
     }
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "WDT dikonfigurasi: timeout %lu ms", (unsigned long)timeout_ms);
+    } else {
+        ESP_LOGW(TAG, "WDT gagal dikonfigurasi: %s", esp_err_to_name(err));
+    }
     return err;
-	
-	ESP_LOGI(TAG, "WDT dikonfigurasi: timeout %lu ms", (unsigned long)timeout_ms);
 }
 
-static esp_err_t validate_task_config(const rt_task_config_t *config) {
+static esp_err_t RAF_SchedulerValidateConfig(const RAF_TaskConfig_t *config) {
     if (config == NULL || config->callback == NULL) {
         ESP_LOGE(TAG, "Config Invalid: config atau callback NULL");
         return ESP_ERR_INVALID_ARG;
@@ -90,7 +93,7 @@ static esp_err_t validate_task_config(const rt_task_config_t *config) {
                  (unsigned long)config->period_ms);
         return ESP_ERR_INVALID_ARG;
     }
-    if (config->priority < RT_PRIO_BACKGROUND || config->priority > RT_PRIO_REALTIME) {
+    if (config->priority < RAF_RT_PRIO_BACKGROUND || config->priority > RAF_RT_PRIO_REALTIME) {
         ESP_LOGE(TAG, "Config Invalid: priority %d di luar range", config->priority);
         return ESP_ERR_INVALID_ARG;
     }
@@ -99,17 +102,17 @@ static esp_err_t validate_task_config(const rt_task_config_t *config) {
                  (unsigned long)config->stack_size);
         return ESP_ERR_INVALID_ARG;
     }
-    if (config->core != RT_CORE_ANY &&
-        config->core != RT_CORE_0 &&
-        config->core != RT_CORE_1) {
+    if (config->core != RAF_RT_CORE_ANY &&
+        config->core != RAF_RT_CORE_0 &&
+        config->core != RAF_RT_CORE_1) {
         ESP_LOGE(TAG, "Config Invalid: core %d tidak valid", config->core);
         return ESP_ERR_INVALID_ARG;
     }
     return ESP_OK;
 }
 
-static void rt_generic_task_wrapper(void *pvParameters) {
-    rt_task_slot_t *slot = (rt_task_slot_t *)pvParameters;
+static void RAF_SchedulerTaskWrapper(void *pvParameters) {
+    RAF_TaskSlot_t *slot = (RAF_TaskSlot_t *)pvParameters;
 
     if (slot->config.phase_ms > 0) {
         vTaskDelay(pdMS_TO_TICKS(slot->config.phase_ms));
@@ -119,6 +122,10 @@ static void rt_generic_task_wrapper(void *pvParameters) {
 
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(slot->config.period_ms);
+    const int64_t period_us = (int64_t)slot->config.period_ms * 1000LL;
+
+    int64_t expected_us = esp_timer_get_time();
+    bool was_enabled = false;
 
     while (1) {
         bool en;
@@ -126,15 +133,29 @@ static void rt_generic_task_wrapper(void *pvParameters) {
         en = slot->enabled;
         xSemaphoreGive(slot->lock);
 
+        if (en && !was_enabled) {
+            expected_us = esp_timer_get_time();
+            xLastWakeTime = xTaskGetTickCount();
+            was_enabled = true;
+        } else if (!en) {
+            expected_us = esp_timer_get_time();
+            was_enabled = false;
+        }
+
         if (en) {
-            int64_t expected_us =
-                (int64_t)xLastWakeTime * 1000000LL / configTICK_RATE_HZ;
             int64_t start_time_us = esp_timer_get_time();
 
             slot->config.callback(slot->config.arg);
 
             int64_t end_time_us = esp_timer_get_time();
             uint32_t exec_duration_us = (uint32_t)(end_time_us - start_time_us);
+
+            // Jitter: start aktual vs expected (keduanya dari esp_timer)
+            int64_t jitter_us = start_time_us - expected_us;
+            if (jitter_us < 0) jitter_us = -jitter_us;
+            if (jitter_us > (int64_t)slot->max_jitter_us) {
+                slot->max_jitter_us = (uint32_t)jitter_us;
+            }
 
             xSemaphoreTake(slot->lock, portMAX_DELAY);
 
@@ -150,15 +171,8 @@ static void rt_generic_task_wrapper(void *pvParameters) {
                 slot->execution_overruns++;
             }
 
-            int64_t jitter_us = start_time_us - expected_us;
-            if (jitter_us < 0) jitter_us = -jitter_us;
-            if (jitter_us > (int64_t)slot->max_jitter_us) {
-                slot->max_jitter_us = (uint32_t)jitter_us;
-            }
-
             if (slot->config.deadline_ms > 0) {
-                int64_t deadline_us =
-                    expected_us + (int64_t)slot->config.deadline_ms * 1000LL;
+                int64_t deadline_us = expected_us + (int64_t)slot->config.deadline_ms * 1000LL;
                 if (end_time_us > deadline_us) {
                     slot->deadline_misses++;
                 }
@@ -172,17 +186,23 @@ static void rt_generic_task_wrapper(void *pvParameters) {
         TickType_t tick_before = xLastWakeTime;
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
+        if (en) {
+            expected_us += period_us;
+        }
+
         TickType_t now = xTaskGetTickCount();
-        if ((now - tick_before) > xFrequency) {
+        TickType_t elapsed = now - tick_before;
+        if (elapsed > xFrequency) {
+            uint32_t missed = elapsed / xFrequency;
             xSemaphoreTake(slot->lock, portMAX_DELAY);
-            slot->missed_periods++;
+            slot->missed_periods += missed;
             xSemaphoreGive(slot->lock);
         }
     }
 }
 
-esp_err_t init_scheduler_engine(void) {
-    if (s_scheduler_state != RT_STATE_UNINITIALIZED) {
+esp_err_t RAF_SchedulerInit(void) {
+    if (s_scheduler_state != RAF_RT_STATE_UNINITIALIZED) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -191,7 +211,7 @@ esp_err_t init_scheduler_engine(void) {
 
     s_registry_lock = xSemaphoreCreateMutex();
     if (s_registry_lock == NULL) {
-        s_scheduler_state = RT_STATE_ERROR;
+        s_scheduler_state = RAF_RT_STATE_ERROR;
         ESP_LOGE(TAG, "Gagal membuat registry mutex");
         return ESP_ERR_NO_MEM;
     }
@@ -200,46 +220,46 @@ esp_err_t init_scheduler_engine(void) {
     if (err != ESP_OK) {
         vSemaphoreDelete(s_registry_lock);
         s_registry_lock = NULL;
-        s_scheduler_state = RT_STATE_ERROR;
+        s_scheduler_state = RAF_RT_STATE_ERROR;
         ESP_LOGE(TAG, "Gagal init WDT: %s", esp_err_to_name(err));
         return err;
     }
 
-    s_scheduler_state = RT_STATE_INITIALIZED;
+    s_scheduler_state = RAF_RT_STATE_INITIALIZED;
     ESP_LOGI(TAG, "RTOS Scheduler Engine initialized.");
     return ESP_OK;
 }
 
-esp_err_t rt_scheduler_register_task(const rt_task_config_t *config, rt_task_id_t *out_task_id) {
-    if (s_scheduler_state != RT_STATE_INITIALIZED &&
-        s_scheduler_state != RT_STATE_REGISTERING) {
+esp_err_t RAF_SchedulerRegisterTask(const RAF_TaskConfig_t *config, RAF_TaskId_t *out_task_id) {
+    if (s_scheduler_state != RAF_RT_STATE_INITIALIZED &&
+        s_scheduler_state != RAF_RT_STATE_REGISTERING) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t err = validate_task_config(config);
+    esp_err_t err = RAF_SchedulerValidateConfig(config);
     if (err != ESP_OK) return err;
 
     xSemaphoreTake(s_registry_lock, portMAX_DELAY);
 
-    if (s_task_count >= RT_MAX_TASKS) {
+    if (s_task_count >= RAF_RT_MAX_TASKS) {
         xSemaphoreGive(s_registry_lock);
         return ESP_ERR_NO_MEM;
     }
 
-    rt_task_slot_t *slot = &s_task_slots[s_task_count];
-    memset(slot, 0, sizeof(rt_task_slot_t));
+    RAF_TaskSlot_t *slot = &s_task_slots[s_task_count];
+    memset(slot, 0, sizeof(RAF_TaskSlot_t));
 
-    memcpy(&slot->config, config, sizeof(rt_task_config_t));
+    memcpy(&slot->config, config, sizeof(RAF_TaskConfig_t));
 
-    slot->config.name[RT_TASK_NAME_MAX_LEN - 1] = '\0';
+    slot->config.name[RAF_RT_TASK_NAME_MAX_LEN - 1] = '\0';
 
-    slot->id = (rt_task_id_t)(s_task_count + 1);
+    slot->id = (RAF_TaskId_t)(s_task_count + 1);
     slot->enabled = config->enabled_on_boot;
     slot->min_exec_us = UINT32_MAX;
 
     slot->lock = xSemaphoreCreateMutex();
     if (slot->lock == NULL) {
-        memset(slot, 0, sizeof(rt_task_slot_t));
+        memset(slot, 0, sizeof(RAF_TaskSlot_t));
         xSemaphoreGive(s_registry_lock);
         return ESP_ERR_NO_MEM;
     }
@@ -248,7 +268,7 @@ esp_err_t rt_scheduler_register_task(const rt_task_config_t *config, rt_task_id_
     if (out_task_id) *out_task_id = slot->id;
 
     s_task_count++;
-    s_scheduler_state = RT_STATE_REGISTERING;
+    s_scheduler_state = RAF_RT_STATE_REGISTERING;
 
     xSemaphoreGive(s_registry_lock);
 
@@ -260,9 +280,9 @@ esp_err_t rt_scheduler_register_task(const rt_task_config_t *config, rt_task_id_
     return ESP_OK;
 }
 
-esp_err_t rt_scheduler_start(void) {
-    if (s_scheduler_state != RT_STATE_REGISTERING &&
-        s_scheduler_state != RT_STATE_INITIALIZED) {
+esp_err_t RAF_SchedulerStart(void) {
+    if (s_scheduler_state != RAF_RT_STATE_REGISTERING &&
+        s_scheduler_state != RAF_RT_STATE_INITIALIZED) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -276,18 +296,26 @@ esp_err_t rt_scheduler_start(void) {
 	uint32_t wdt_timeout = max_period + 1000;
 	if (wdt_timeout < 3000) wdt_timeout = 3000;
 
+    esp_err_t wdt_err = init_task_watchdog(wdt_timeout);
+    if (wdt_err != ESP_OK) {
+        s_scheduler_state = RAF_RT_STATE_ERROR;
+        ESP_LOGE(TAG, "Gagal menerapkan timeout WDT %lu ms: %s",
+                 (unsigned long)wdt_timeout, esp_err_to_name(wdt_err));
+        return wdt_err;
+    }
+
     xSemaphoreTake(s_registry_lock, portMAX_DELAY);
 
     size_t created = 0;
     for (size_t i = 0; i < s_task_count; i++) {
-        rt_task_slot_t *slot = &s_task_slots[i];
+        RAF_TaskSlot_t *slot = &s_task_slots[i];
         uint32_t stack = (slot->config.stack_size > 0) ? slot->config.stack_size : 3072;
-        BaseType_t core_affinity = (slot->config.core == RT_CORE_ANY)
+        BaseType_t core_affinity = (slot->config.core == RAF_RT_CORE_ANY)
                                    ? tskNO_AFFINITY
                                    : (BaseType_t)slot->config.core;
 
         BaseType_t res = xTaskCreatePinnedToCore(
-            rt_generic_task_wrapper,
+            RAF_SchedulerTaskWrapper,
             slot->config.name,
             stack,
             (void *)slot,
@@ -304,27 +332,27 @@ esp_err_t rt_scheduler_start(void) {
                     s_task_slots[j].free_rtos_handle = NULL;
                 }
             }
-            s_scheduler_state = RT_STATE_ERROR;
+            s_scheduler_state = RAF_RT_STATE_ERROR;
             xSemaphoreGive(s_registry_lock);
             return ESP_FAIL;
         }
         created++;
     }
 
-    s_scheduler_state = RT_STATE_RUNNING;
+    s_scheduler_state = RAF_RT_STATE_RUNNING;
     xSemaphoreGive(s_registry_lock);
 
     ESP_LOGI(TAG, "Scheduler RUNNING dengan %zu task aktif.", s_task_count);
     return ESP_OK;
 }
 
-rt_scheduler_state_t rt_scheduler_get_state(void) {
+RAF_SchedulerState_t RAF_SchedulerGetState(void) {
     return s_scheduler_state;
 }
 
-esp_err_t rt_task_enable(rt_task_id_t task_id) {
+esp_err_t RAF_TaskEnable(RAF_TaskId_t task_id) {
     if (task_id == 0 || task_id > s_task_count) return ESP_ERR_INVALID_ARG;
-    rt_task_slot_t *slot = &s_task_slots[task_id - 1];
+    RAF_TaskSlot_t *slot = &s_task_slots[task_id - 1];
     if (slot->lock == NULL) return ESP_ERR_INVALID_STATE;
 
     xSemaphoreTake(slot->lock, portMAX_DELAY);
@@ -333,9 +361,9 @@ esp_err_t rt_task_enable(rt_task_id_t task_id) {
     return ESP_OK;
 }
 
-esp_err_t rt_task_disable(rt_task_id_t task_id) {
+esp_err_t RAF_TaskDisable(RAF_TaskId_t task_id) {
     if (task_id == 0 || task_id > s_task_count) return ESP_ERR_INVALID_ARG;
-    rt_task_slot_t *slot = &s_task_slots[task_id - 1];
+    RAF_TaskSlot_t *slot = &s_task_slots[task_id - 1];
     if (slot->lock == NULL) return ESP_ERR_INVALID_STATE;
 
     xSemaphoreTake(slot->lock, portMAX_DELAY);
@@ -344,11 +372,11 @@ esp_err_t rt_task_disable(rt_task_id_t task_id) {
     return ESP_OK;
 }
 
-esp_err_t rt_task_get_stats(rt_task_id_t task_id, rt_task_stats_t *out_stats) {
+esp_err_t RAF_TaskGetStats(RAF_TaskId_t task_id, RAF_TaskStats_t *out_stats) {
     if (task_id == 0 || task_id > s_task_count || out_stats == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    rt_task_slot_t *slot = &s_task_slots[task_id - 1];
+    RAF_TaskSlot_t *slot = &s_task_slots[task_id - 1];
     if (slot->lock == NULL) return ESP_ERR_INVALID_STATE;
 
     memset(out_stats, 0, sizeof(*out_stats));
@@ -356,8 +384,8 @@ esp_err_t rt_task_get_stats(rt_task_id_t task_id, rt_task_stats_t *out_stats) {
     xSemaphoreTake(slot->lock, portMAX_DELAY);
 
     out_stats->id = slot->id;
-    strncpy(out_stats->name, slot->config.name, RT_TASK_NAME_MAX_LEN - 1);
-    out_stats->name[RT_TASK_NAME_MAX_LEN - 1] = '\0';
+    strncpy(out_stats->name, slot->config.name, RAF_RT_TASK_NAME_MAX_LEN - 1);
+    out_stats->name[RAF_RT_TASK_NAME_MAX_LEN - 1] = '\0';
     out_stats->enabled = slot->enabled;
     out_stats->execution_count = slot->execution_count;
     out_stats->execution_overruns = slot->execution_overruns;
@@ -369,29 +397,61 @@ esp_err_t rt_task_get_stats(rt_task_id_t task_id, rt_task_stats_t *out_stats) {
     out_stats->avg_exec_us = (slot->execution_count > 0)
         ? (uint32_t)(slot->total_exec_us / slot->execution_count) : 0;
     out_stats->max_jitter_us = slot->max_jitter_us;
+    out_stats->stack_high_water = (slot->free_rtos_handle != NULL)
+        ? (uint32_t)uxTaskGetStackHighWaterMark(slot->free_rtos_handle) : 0;
 
     xSemaphoreGive(slot->lock);
     return ESP_OK;
 }
 
-void rt_scheduler_print_stats(void) {
+esp_err_t RAF_SchedulerResetMetrics(RAF_TaskId_t task_id) {
+    if (task_id == 0 || task_id > s_task_count) return ESP_ERR_INVALID_ARG;
+
+    RAF_TaskSlot_t *slot = &s_task_slots[task_id - 1];
+    if (slot->lock == NULL) return ESP_ERR_INVALID_STATE;
+
+    xSemaphoreTake(slot->lock, portMAX_DELAY);
+    slot->execution_count = 0;
+    slot->execution_overruns = 0;
+    slot->deadline_misses = 0;
+    slot->missed_periods = 0;
+    slot->min_exec_us = UINT32_MAX;
+    slot->max_exec_us = 0;
+    slot->total_exec_us = 0;
+    slot->last_exec_us = 0;
+    slot->max_jitter_us = 0;
+    xSemaphoreGive(slot->lock);
+
+    return ESP_OK;
+}
+
+esp_err_t RAF_SchedulerResetAllMetrics(void) {
+    for (size_t i = 0; i < s_task_count; i++) {
+        esp_err_t err = RAF_SchedulerResetMetrics((RAF_TaskId_t)(i + 1));
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
+}
+
+void RAF_SchedulerPrintStats(void) {
     ESP_LOGI(TAG, "=================================== INDUSTRIAL RTOS METRICS SNAPSHOT ===================================");
-    ESP_LOGI(TAG, "%-3s | %-10s | %-3s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s",
+    ESP_LOGI(TAG, "%-3s | %-10s | %-3s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s",
              "ID", "Name", "En", "Min(us)", "Avg(us)", "Max(us)",
-             "Jitter", "Overrun", "Deadline", "Missed");
+             "Jitter", "Overrun", "Deadline", "Missed", "StackHW");
     ESP_LOGI(TAG, "--------------------------------------------------------------------------------------------------------");
 
     for (size_t i = 0; i < s_task_count; i++) {
-        rt_task_stats_t st;
-        if (rt_task_get_stats((rt_task_id_t)(i + 1), &st) == ESP_OK) {
+        RAF_TaskStats_t st;
+        if (RAF_TaskGetStats((RAF_TaskId_t)(i + 1), &st) == ESP_OK) {
             ESP_LOGI(TAG, "%-3" PRIu32 " | %-10s | %-3s | %-8" PRIu32
                           " | %-8" PRIu32 " | %-8" PRIu32
                           " | %-8" PRIu32 " | %-8" PRIu32 " | %-8" PRIu32
-                          " | %-8" PRIu32,
+                         " | %-8" PRIu32 " | %-8" PRIu32,
 			         st.id, st.name, st.enabled ? "Y" : "N",
 			         st.min_exec_us, st.avg_exec_us, st.max_exec_us,
                      st.max_jitter_us, st.execution_overruns,
-                     st.deadline_misses, st.missed_periods);
+                         st.deadline_misses, st.missed_periods,
+                         st.stack_high_water);
         }
     }
     ESP_LOGI(TAG, "================================================================================------------------------");

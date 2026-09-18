@@ -69,16 +69,16 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         //    - Reg_Count   : Jumlah register yang dibaca
         //
 		static modbus_slave_node_t slaves[] = {
-		    { "CNC_MILLING_VMC",      "192.168.1.8", 502,  1, 0, 10, {0}, false },
-		    { "CNC_LATHE",            "192.168.1.8", 502,  2, 0, 10, {0}, false },
-		    { "HYDRAULIC_PRESS_200T", "192.168.1.8", 502,  3, 0, 10, {0}, false },
-		    { "WELDING_ROBOT",        "192.168.1.8", 502,  4, 0, 10, {0}, false },
-		    { "PAINT_BOOTH_OVEN",     "192.168.1.8", 502,  5, 0, 10, {0}, false },
-		    { "WHEEL_LATHE",          "192.168.1.8", 502,  6, 0, 10, {0}, false },
-		    { "BOGIE_TEST_RIG",       "192.168.1.8", 502,  7, 0, 10, {0}, false },
-		    { "TRACTION_MOTOR_BENCH", "192.168.1.8", 502,  8, 0, 10, {0}, false },
-		    { "AIR_COMPRESSOR",       "192.168.1.8", 502,  9, 0, 10, {0}, false },
-		    { "COOLING_CHILLER",      "192.168.1.8", 502, 10, 0, 10, {0}, false },
+		    { "CNC_MILLING_VMC",      "192.168.1.4", 502,  1, 0, 10, {0}, false },
+		    { "CNC_LATHE",            "192.168.1.4", 502,  2, 0, 10, {0}, false },
+		    { "HYDRAULIC_PRESS_200T", "192.168.1.4", 502,  3, 0, 10, {0}, false },
+		    { "WELDING_ROBOT",        "192.168.1.4", 502,  4, 0, 10, {0}, false },
+		    { "PAINT_BOOTH_OVEN",     "192.168.1.4", 502,  5, 0, 10, {0}, false },
+		    { "WHEEL_LATHE",          "192.168.1.4", 502,  6, 0, 10, {0}, false },
+		    { "BOGIE_TEST_RIG",       "192.168.1.4", 502,  7, 0, 10, {0}, false },
+		    { "TRACTION_MOTOR_BENCH", "192.168.1.4", 502,  8, 0, 10, {0}, false },
+		    { "AIR_COMPRESSOR",       "192.168.1.4", 502,  9, 0, 10, {0}, false },
+		    { "COOLING_CHILLER",      "192.168.1.4", 502, 10, 0, 10, {0}, false },
 		};
 		com_modbus_master_init(slaves, 10);
 
