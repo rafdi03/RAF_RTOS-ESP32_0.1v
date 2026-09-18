@@ -350,6 +350,21 @@ RAF_SchedulerState_t RAF_SchedulerGetState(void) {
     return s_scheduler_state;
 }
 
+static RAF_TaskId_t RAF_SchedulerFindTaskIdByName(const char *task_name) {
+    if (task_name == NULL || task_name[0] == '\0') {
+        return RAF_RT_INVALID_TASK_ID;
+    }
+
+    for (size_t i = 0; i < s_task_count; i++) {
+        if (strncmp(s_task_slots[i].config.name, task_name,
+                    RAF_RT_TASK_NAME_MAX_LEN) == 0) {
+            return s_task_slots[i].id;
+        }
+    }
+
+    return RAF_RT_INVALID_TASK_ID;
+}
+
 esp_err_t RAF_TaskEnable(RAF_TaskId_t task_id) {
     if (task_id == 0 || task_id > s_task_count) return ESP_ERR_INVALID_ARG;
     RAF_TaskSlot_t *slot = &s_task_slots[task_id - 1];
@@ -370,6 +385,18 @@ esp_err_t RAF_TaskDisable(RAF_TaskId_t task_id) {
     slot->enabled = false;
     xSemaphoreGive(slot->lock);
     return ESP_OK;
+}
+
+esp_err_t RAF_TaskEnableByName(const char *task_name) {
+    RAF_TaskId_t task_id = RAF_SchedulerFindTaskIdByName(task_name);
+    if (task_id == RAF_RT_INVALID_TASK_ID) return ESP_ERR_NOT_FOUND;
+    return RAF_TaskEnable(task_id);
+}
+
+esp_err_t RAF_TaskDisableByName(const char *task_name) {
+    RAF_TaskId_t task_id = RAF_SchedulerFindTaskIdByName(task_name);
+    if (task_id == RAF_RT_INVALID_TASK_ID) return ESP_ERR_NOT_FOUND;
+    return RAF_TaskDisable(task_id);
 }
 
 esp_err_t RAF_TaskGetStats(RAF_TaskId_t task_id, RAF_TaskStats_t *out_stats) {
@@ -402,6 +429,12 @@ esp_err_t RAF_TaskGetStats(RAF_TaskId_t task_id, RAF_TaskStats_t *out_stats) {
 
     xSemaphoreGive(slot->lock);
     return ESP_OK;
+}
+
+esp_err_t RAF_TaskGetStatsByName(const char *task_name, RAF_TaskStats_t *out_stats) {
+    RAF_TaskId_t task_id = RAF_SchedulerFindTaskIdByName(task_name);
+    if (task_id == RAF_RT_INVALID_TASK_ID) return ESP_ERR_NOT_FOUND;
+    return RAF_TaskGetStats(task_id, out_stats);
 }
 
 esp_err_t RAF_SchedulerResetMetrics(RAF_TaskId_t task_id) {

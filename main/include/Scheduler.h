@@ -79,16 +79,16 @@ typedef struct {
     bool enabled;
 
     uint32_t execution_count;
-    uint32_t execution_overruns; // T_exec > deadline_ms
-    uint32_t deadline_misses;    // Terlambat dipanggil relatif terhadap periode
-    uint32_t missed_periods;     // Periode scheduler yang terlewati
+    uint32_t execution_overruns;
+    uint32_t deadline_misses;    
+    uint32_t missed_periods;     
 
     uint32_t min_exec_us;
     uint32_t max_exec_us;
     uint32_t avg_exec_us;
     uint32_t last_exec_us;
     uint32_t max_jitter_us;
-    uint32_t stack_high_water; // Sisa minimum stack dalam words
+    uint32_t stack_high_water; 
 } RAF_TaskStats_t;
 
 // API Lifecycle Engine
@@ -101,6 +101,9 @@ RAF_SchedulerState_t RAF_SchedulerGetState(void);
 esp_err_t RAF_TaskEnable(RAF_TaskId_t task_id);
 esp_err_t RAF_TaskDisable(RAF_TaskId_t task_id);
 esp_err_t RAF_TaskGetStats(RAF_TaskId_t task_id, RAF_TaskStats_t *out_stats);
+esp_err_t RAF_TaskEnableByName(const char *task_name);
+esp_err_t RAF_TaskDisableByName(const char *task_name);
+esp_err_t RAF_TaskGetStatsByName(const char *task_name, RAF_TaskStats_t *out_stats);
 esp_err_t RAF_SchedulerResetMetrics(RAF_TaskId_t task_id);
 esp_err_t RAF_SchedulerResetAllMetrics(void);
 void RAF_SchedulerPrintStats(void);

@@ -6,20 +6,6 @@
  */
 
 #include "application.h"
-#include "app_module.h"
-#include "main.h"
-#include "COM.h"
-#include "ringbuff_com.h"
-#include "IMU_MPU.h"
-#include "IoT_Response.h"
-#include "LCD.h"
-#include "com_can.h"
-#include "com_modbus_tcp.h"
-#include "com_wifi.h"
-#include "esp_log.h"
-#include "freertos/task.h"
-#include <stdint.h>
-#include <string.h>
 
 static const char *TAG = "RAF_APPLICATION";
 

@@ -10,8 +10,8 @@
 
  
  void app_main(void) {
-    ESP_ERROR_CHECK(RAF_SchedulerInit());
+   ESP_ERROR_CHECK(RAF_SchedulerInit());
    ESP_ERROR_CHECK(RAF_ApplicationInit());
-    ESP_ERROR_CHECK(RAF_SchedulerStart());
+   ESP_ERROR_CHECK(RAF_SchedulerStart());
 
  }
