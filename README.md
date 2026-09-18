@@ -622,11 +622,6 @@ The current test file still contains original hello-world expectations. Update t
 | `partitions.csv` | OTA and log partition layout |
 | `main/CMakeLists.txt` | Sources and ESP-IDF dependencies |
 
-## License
-
-No `LICENSE` file is currently present in this repository. Until the author adds one, the source should be treated as **all rights reserved**. Do not redistribute, modify, or use it as a public dependency without the author's permission.
-
-When reuse terms are decided, add the complete license text in a root-level `LICENSE` file and update this section to link to it. MIT and Apache-2.0 are common choices for reusable frameworks, but the author must choose the intended license.
 
 ## Author
 
