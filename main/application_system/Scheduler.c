@@ -118,7 +118,9 @@ static void RAF_SchedulerTaskWrapper(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(slot->config.phase_ms));
     }
 
-    esp_task_wdt_add(NULL);
+	#if RAF_CONFIG_WDT_ENABLED
+	    esp_task_wdt_add(NULL);
+	#endif
 
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(slot->config.period_ms);
@@ -181,7 +183,9 @@ static void RAF_SchedulerTaskWrapper(void *pvParameters) {
             xSemaphoreGive(slot->lock);
         }
 
-        esp_task_wdt_reset();
+		#if RAF_CONFIG_WDT_ENABLED
+		        esp_task_wdt_reset();
+		#endif
 
         TickType_t tick_before = xLastWakeTime;
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
@@ -216,14 +220,18 @@ esp_err_t RAF_SchedulerInit(void) {
         return ESP_ERR_NO_MEM;
     }
 
-    esp_err_t err = init_task_watchdog(3000);
-    if (err != ESP_OK) {
-        vSemaphoreDelete(s_registry_lock);
-        s_registry_lock = NULL;
-        s_scheduler_state = RAF_RT_STATE_ERROR;
-        ESP_LOGE(TAG, "Gagal init WDT: %s", esp_err_to_name(err));
-        return err;
-    }
+	#if RAF_CONFIG_WDT_ENABLED
+	    esp_err_t err = init_task_watchdog(RAF_CONFIG_WDT_TIMEOUT_MS);   // ← CONFIG
+	    if (err != ESP_OK) {
+	        vSemaphoreDelete(s_registry_lock);
+	        s_registry_lock = NULL;
+	        s_scheduler_state = RAF_RT_STATE_ERROR;
+	        ESP_LOGE(TAG, "Gagal init WDT: %s", esp_err_to_name(err));
+	        return err;
+	    }
+	#else
+	    ESP_LOGI(TAG, "WDT dinonaktifkan (RAF_CONFIG_WDT_ENABLED=0)");
+	#endif
 
     s_scheduler_state = RAF_RT_STATE_INITIALIZED;
     ESP_LOGI(TAG, "RTOS Scheduler Engine initialized.");
@@ -285,24 +293,43 @@ esp_err_t RAF_SchedulerStart(void) {
         s_scheduler_state != RAF_RT_STATE_INITIALIZED) {
         return ESP_ERR_INVALID_STATE;
     }
+	
+	#if RAF_CONFIG_WDT_ENABLED
+	    uint32_t max_period = 0;
+	    for (size_t i = 0; i < s_task_count; i++) {
+	        if (s_task_slots[i].config.period_ms > max_period) {
+	            max_period = s_task_slots[i].config.period_ms;
+	        }
+	    }
 
-    // Hitung periode maksimum untuk WDT
-    uint32_t max_period = 0;
-    for (size_t i = 0; i < s_task_count; i++) {
-        if (s_task_slots[i].config.period_ms > max_period) {
-            max_period = s_task_slots[i].config.period_ms;
-        }
-    }
-	uint32_t wdt_timeout = max_period + 1000;
-	if (wdt_timeout < 3000) wdt_timeout = 3000;
+	    uint32_t wdt_timeout = RAF_CONFIG_WDT_TIMEOUT_MS;
 
-    esp_err_t wdt_err = init_task_watchdog(wdt_timeout);
-    if (wdt_err != ESP_OK) {
-        s_scheduler_state = RAF_RT_STATE_ERROR;
-        ESP_LOGE(TAG, "Gagal menerapkan timeout WDT %lu ms: %s",
-                 (unsigned long)wdt_timeout, esp_err_to_name(wdt_err));
-        return wdt_err;
-    }
+	#if RAF_CONFIG_WDT_AUTO_EXPAND
+	    uint32_t min_required = max_period + RAF_CONFIG_WDT_GRACE_MARGIN_MS;
+	    if (wdt_timeout < min_required) {
+	        ESP_LOGW(TAG, "WDT auto-expand: %lu -> %lu ms (max task period %lu ms)",
+	                 (unsigned long)wdt_timeout,
+	                 (unsigned long)min_required,
+	                 (unsigned long)max_period);
+	        wdt_timeout = min_required;
+	    }
+	#else
+	    if (max_period + RAF_CONFIG_WDT_GRACE_MARGIN_MS > wdt_timeout) {
+	        ESP_LOGW(TAG, "PERINGATAN: max task period %lu ms akan trigger WDT timeout "
+	                 "%lu ms. Kurangi period atau aktifkan RAF_CONFIG_WDT_AUTO_EXPAND.",
+	                 (unsigned long)max_period,
+	                 (unsigned long)wdt_timeout);
+	    }
+	#endif
+
+	    esp_err_t wdt_err = init_task_watchdog(wdt_timeout);
+	    if (wdt_err != ESP_OK) {
+	        s_scheduler_state = RAF_RT_STATE_ERROR;
+	        ESP_LOGE(TAG, "Gagal menerapkan WDT timeout %lu ms: %s",
+	                 (unsigned long)wdt_timeout, esp_err_to_name(wdt_err));
+	        return wdt_err;
+	    }
+	#endif
 
     xSemaphoreTake(s_registry_lock, portMAX_DELAY);
 

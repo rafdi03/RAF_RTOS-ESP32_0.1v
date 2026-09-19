@@ -9,6 +9,9 @@
 
 static const char *TAG = "RAF_APPLICATION";
 
+// ============================================================================
+// Module Init Wrappers
+// ============================================================================
 static esp_err_t RAF_ApplicationInitImu(void) {
     return imu_mpu_init(NULL);
 }
@@ -17,14 +20,37 @@ static esp_err_t RAF_ApplicationInitLcd(void) {
     return lcd_init(NULL);
 }
 
-static void RAF_ApplicationJobComDispatch(void *arg) {
-    (void)arg;
+// ============================================================================
+// Context Pattern — Konsisten untuk semua task
+// ============================================================================
+typedef void (*RAF_ModuleUpdate_t)(void *context);
+
+typedef struct {
+    RAF_ModuleUpdate_t update;
+    void *context;
+} RAF_ModuleCallbackContext_t;
+
+static void RAF_ApplicationJobModule(void *arg) {
+    RAF_ModuleCallbackContext_t *module = (RAF_ModuleCallbackContext_t *)arg;
+
+    if (module == NULL || module->update == NULL) {
+        return;
+    }
+
+    module->update(module->context);
+}
+
+// ============================================================================
+// Update Functions per Modul
+// ============================================================================
+static void update_com_dispatch(void *context) {
+    (void)context;
     com_update_1ms();
     com_can_rx_poll();
 }
 
-static void RAF_ApplicationJobDiagnostics(void *arg) {
-    (void)arg;
+static void update_diagnostics(void *context) {
+    (void)context;
     ringbuf_com_print_stats();
     RAF_SchedulerPrintStats();
 
@@ -43,23 +69,42 @@ static void RAF_ApplicationJobDiagnostics(void *arg) {
     }
 }
 
-static void RAF_ApplicationJobImu(void *arg) {
-    (void)arg;
+static void update_imu(void *context) {
+    (void)context;
     imu_mpu_update();
 }
+
+// ============================================================================
+// Context Instances
+// ============================================================================
+static RAF_ModuleCallbackContext_t s_com_dispatch_context = {
+    .update = update_com_dispatch,
+    .context = NULL,
+};
+
+static RAF_ModuleCallbackContext_t s_diagnostics_context = {
+    .update = update_diagnostics,
+    .context = NULL,
+};
+
+static RAF_ModuleCallbackContext_t s_imu_context = {
+    .update = update_imu,
+    .context = NULL,
+};
 
 static const RAF_AppModule_t s_modules[] = {
     {
         .name = "COM_Dispatch",
         .task = {
-            .name = "COM_Dispatch",
-            .period_ms = 1,
-            .phase_ms = 0,
-            .deadline_ms = 1,
-            .priority = RAF_RT_PRIO_REALTIME,
-            .core = RAF_RT_CORE_1,
-            .stack_size = 4096,
-            .callback = RAF_ApplicationJobComDispatch,
+            .name            = "COM_Dispatch",
+            .period_ms       = 1,
+            .phase_ms        = 0,
+            .deadline_ms     = 1,
+            .priority        = RAF_RT_PRIO_REALTIME,
+            .core            = RAF_RT_CORE_1,
+            .stack_size      = 4096,
+            .callback        = RAF_ApplicationJobModule,
+            .arg             = &s_com_dispatch_context,
             .enabled_on_boot = true,
         },
         .required = true,
@@ -67,14 +112,15 @@ static const RAF_AppModule_t s_modules[] = {
     {
         .name = "SYS_Diag",
         .task = {
-            .name = "SYS_Diag",
-            .period_ms = 1000,
-            .phase_ms = 100,
-            .deadline_ms = 0,
-            .priority = RAF_RT_PRIO_BACKGROUND,
-            .core = RAF_RT_CORE_0,
-            .stack_size = 3072,
-            .callback = RAF_ApplicationJobDiagnostics,
+            .name            = "SYS_Diag",
+            .period_ms       = 1000,
+            .phase_ms        = 100,
+            .deadline_ms     = 0,
+            .priority        = RAF_RT_PRIO_BACKGROUND,
+            .core            = RAF_RT_CORE_0,
+            .stack_size      = 3072,
+            .callback        = RAF_ApplicationJobModule,
+            .arg             = &s_diagnostics_context,  
             .enabled_on_boot = true,
         },
         .required = true,
@@ -83,21 +129,22 @@ static const RAF_AppModule_t s_modules[] = {
         .name = "IMU_MPU6050",
         .init = RAF_ApplicationInitImu,
         .task = {
-            .name = "IMU_Poll",
-            .period_ms = 10,
-            .phase_ms = 0,
-            .deadline_ms = 0,
-            .priority = RAF_RT_PRIO_HIGH,
-            .core = RAF_RT_CORE_1,
-            .stack_size = 4096,
-            .callback = RAF_ApplicationJobImu,
+            .name            = "IMU_Poll",
+            .period_ms       = 10,
+            .phase_ms        = 0,
+            .deadline_ms     = 0,
+            .priority        = RAF_RT_PRIO_HIGH,
+            .core            = RAF_RT_CORE_1,
+            .stack_size      = 4096,
+            .callback        = RAF_ApplicationJobModule,
+            .arg             = &s_imu_context,
             .enabled_on_boot = true,
         },
         .required = false,
     },
     {
-        .name = "LCD",
-        .init = RAF_ApplicationInitLcd,
+        .name     = "LCD",
+        .init     = RAF_ApplicationInitLcd,
         .required = false,
     },
 };
@@ -131,6 +178,8 @@ static esp_err_t RAF_ApplicationRegisterModule(const RAF_AppModule_t *module,
     if (module == NULL || module->name == NULL) return ESP_ERR_INVALID_ARG;
 
     esp_err_t err;
+
+    // 1) Init hardware
     if (module->init != NULL) {
         err = module->init();
         if (err != ESP_OK) {
@@ -147,16 +196,17 @@ static esp_err_t RAF_ApplicationRegisterModule(const RAF_AppModule_t *module,
         ESP_LOGI(TAG, "[%s] init OK", module->name);
     }
 
+    // 2) Register ISR (kalau ada)
     if (module->isr.enabled && module->isr.handler != NULL) {
         err = RAF_ApplicationInitIrqService();
         if (err != ESP_OK) return err;
 
         gpio_config_t gpio_cfg = {
             .pin_bit_mask = (1ULL << module->isr.pin),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .mode         = GPIO_MODE_INPUT,
+            .pull_up_en   = GPIO_PULLUP_ENABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = module->isr.trigger,
+            .intr_type    = module->isr.trigger,
         };
         err = gpio_config(&gpio_cfg);
         if (err != ESP_OK) {
@@ -166,7 +216,7 @@ static esp_err_t RAF_ApplicationRegisterModule(const RAF_AppModule_t *module,
         }
 
         err = gpio_isr_handler_add(module->isr.pin, module->isr.handler,
-                       module->isr.arg);
+                                   module->isr.arg);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "[%s] ISR add gagal: %s", module->name,
                      esp_err_to_name(err));
@@ -176,6 +226,7 @@ static esp_err_t RAF_ApplicationRegisterModule(const RAF_AppModule_t *module,
                  module->isr.pin);
     }
 
+    // 3) Register task (kalau ada)
     if (module->task.callback != NULL) {
         if (module->task.name == NULL || module->task.name[0] == '\0') {
             ESP_LOGE(TAG, "[%s] task.name kosong", module->name);
@@ -183,14 +234,14 @@ static esp_err_t RAF_ApplicationRegisterModule(const RAF_AppModule_t *module,
         }
 
         RAF_TaskConfig_t task_config = {
-            .period_ms = module->task.period_ms,
-            .phase_ms = module->task.phase_ms,
-            .deadline_ms = module->task.deadline_ms,
-            .priority = module->task.priority,
-            .core = module->task.core,
-            .stack_size = module->task.stack_size,
-            .callback = module->task.callback,
-            .arg = module->task.arg,
+            .period_ms       = module->task.period_ms,
+            .phase_ms        = module->task.phase_ms,
+            .deadline_ms     = module->task.deadline_ms,
+            .priority        = module->task.priority,
+            .core            = module->task.core,
+            .stack_size      = module->task.stack_size,
+            .callback        = module->task.callback,
+            .arg             = module->task.arg,
             .enabled_on_boot = module->task.enabled_on_boot,
         };
 
@@ -211,12 +262,16 @@ static esp_err_t RAF_ApplicationRegisterModule(const RAF_AppModule_t *module,
     return ESP_OK;
 }
 
+// ============================================================================
+// Public API
+// ============================================================================
 esp_err_t RAF_ApplicationInit(void) {
     if (s_initialized) {
         ESP_LOGW(TAG, "application sudah pernah diinisialisasi.");
         return ESP_OK;
     }
 
+    // ---- Infrastruktur sistem ----
     esp_err_t err = ringbuf_com_init(RINGBUF_COMM_DEFAULT_SIZE);
     if (err != ESP_OK) return err;
 
@@ -233,10 +288,12 @@ esp_err_t RAF_ApplicationInit(void) {
                  esp_err_to_name(err));
     }
 
+    // ---- Reset task IDs ----
     for (size_t i = 0; i < RAF_TASK_IDX_COUNT; i++) {
         s_task_ids[i] = RAF_RT_INVALID_TASK_ID;
     }
 
+    // ---- Loop semua modul ----
     ESP_LOGI(TAG, "Registering %zu application module(s)...",
              RAF_APP_MODULE_COUNT);
     for (size_t i = 0; i < RAF_APP_MODULE_COUNT; i++) {

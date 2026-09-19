@@ -22,9 +22,10 @@
 #include "esp_log.h"
 #include <string.h>
 #include <inttypes.h> 
+#include "raf_config.h"  
 
-#define RAF_RT_MAX_TASKS          16
-#define RAF_RT_TASK_NAME_MAX_LEN  16
+#define RAF_RT_MAX_TASKS          RAF_CONFIG_MAX_TASKS
+#define RAF_RT_TASK_NAME_MAX_LEN  RAF_CONFIG_TASK_NAME_MAX_LEN
 
 typedef uint16_t RAF_TaskId_t;
 #define RAF_RT_INVALID_TASK_ID    0xFFFF

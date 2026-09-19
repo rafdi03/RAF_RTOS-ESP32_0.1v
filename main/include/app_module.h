@@ -1,3 +1,10 @@
+/*
+ * raf_config.h
+ *
+ *  Created on: 19 Sept 2026
+ *      Author: Rafdi
+ */
+
 #ifndef MAIN_INCLUDE_APP_MODULE_H_
 #define MAIN_INCLUDE_APP_MODULE_H_
 
